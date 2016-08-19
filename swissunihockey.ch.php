@@ -49,6 +49,83 @@ function swissunihockey_ch_get_leagues()
     return $leagues;
 }
 
+function swissunihockey_ch_get_teams($club)
+{
+    $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
+        sprintf('team_options_18/18%s/', $club)
+    );
+    $teams = $item->get();
+    if ($item->isMiss()) {
+        $teams = array();
+        $response = wp_remote_get(
+            sprintf(
+                'https://api-v2.swissunihockey.ch/api/clubs/%s/statistics',
+                $club
+            )
+        );
+        $body = json_decode($response['body'], true);
+        foreach ($body['data']['regions'][0]['rows'] as $entry) {
+            print "rakesh".$entry['team_id'];
+            $_ = array(
+                'id' => $entry['team_id'],
+                'team_name' => $entry['cells'][0]['text'][0]
+            );
+            $teams[] = $_;
+        }
+        $item->set($teams);
+        $item->expiresAfter(86400);
+        $GLOBALS['swissunihockey.ch']['pool']->save($item);
+    }
+    return $teams;
+}
+
+function swissunihockey_ch_get_clubs()
+{
+    $item = $GLOBALS['swissunihockey.ch']['pool']->getItem('clube');
+    $clubs = $item->get();
+    if ($item->isMiss()) {
+        $clubs = array();
+        $response = wp_remote_get(
+            'https://api-v2.swissunihockey.ch/api/clubs'
+        );
+        $body = json_decode($response['body'], true);
+        foreach ($body['entries'] as $entry) {
+            $_ = array(
+                'club_id' => $entry['set_in_context']['club_id'],
+                'club_name' => $entry['text'],
+            );
+            $clubs[] = $_;
+        }
+        $item->set($clubs);
+        $item->expiresAfter(0);
+        $GLOBALS['swissunihockey.ch']['pool']->save($item);
+    }
+    return $clubs;
+}
+
+function swissunihockey_ch_get_clubs_and_teams(){
+    $item = $GLOBALS['swissunihockey.ch']['pool']->getItem('clube');
+    $clubs = $item->get();
+    if (!$clubs) {
+        $clubs = swissunihockey_ch_get_clubs();
+    }
+    foreach ($clubs as $club)
+    {
+        $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
+            sprintf('team_options_18/18%s/', $club['club_id'])
+        );
+        $teams = $item->get();
+        if (!$teams) {
+            $teams = swissunihockey_ch_get_teams($club['club_id']);
+        }
+        $club_teams[] = array(
+            'name' => $club['club_name'],
+            'teams' => $teams,
+        );
+    }
+    return $club_teams;
+}
+
 function swissunihockey_ch_get_seasons()
 {
     $item = $GLOBALS['swissunihockey.ch']['pool']->getItem('seasons');
@@ -73,21 +150,18 @@ function swissunihockey_ch_get_seasons()
     return $seasons;
 }
 
-function swissunihockey_ch_get_games($league, $season, $game_class, $round)
+function swissunihockey_ch_get_games($team_id, $season)
 {
     $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
-        sprintf('games/%s/%s/%s/%s', $league, $season, $game_class, $round)
+        sprintf('games/%s/%s', $team_id, $season)
     );
     $games = $item->get();
     if ($item->isMiss()) {
         $response = wp_remote_get(
             sprintf(
-                'https://api-v2.swissunihockey.ch/api/games'.
-                '?league=%s&season=%s&game_class=%s&round=%s&mode=list',
-                $league,
+                'https://api-v2.swissunihockey.ch/api/games?mode=list&season=%s&team_id=%s',
                 $season,
-                $game_class,
-                $round
+                $team_id
             )
         );
         $body = json_decode($response['body'], true);
@@ -305,12 +379,27 @@ function swissunihockey_ch_options()
             true
         );
         update_option(
+            'swissunihockey_ch_team_id',
+            explode('|', $_REQUEST['club_team'])[1],
+            true
+        );
+        update_option(
+            'swissunihockey_ch_team_name',
+            explode('|', $_REQUEST['club_team'])[0],
+            true
+        );
+        update_option(
             'swissunihockey_ch_season',
             $_REQUEST['season'],
             true
         );
         $_SESSION['swissunihockey.ch']['flashes'] = array(
             'updated' => 'Your options were updated successfully.',
+        );
+        update_option(
+            'swissunihockey_ch_club',
+            $_REQUEST['club'],
+            true
         );
         ?>
         <meta
@@ -325,10 +414,11 @@ function swissunihockey_ch_options()
 
     $league_game_class = get_option('swissunihockey_ch_league_game_class');
     $season = get_option('swissunihockey_ch_season');
+    $stored_team = get_option('swissunihockey_ch_team_name');
 
     $leagues = swissunihockey_ch_get_leagues();
     $seasons = swissunihockey_ch_get_seasons();
-
+    $club_teams = swissunihockey_ch_get_clubs_and_teams();
     ?>
     <div class="swissunihockey-ch">
         <h2>swissunihockey.ch :: Options</h2>
@@ -341,6 +431,25 @@ function swissunihockey_ch_options()
             method="post"
             >
             <table class="bordered widefat wp-list-table">
+                <tr>
+                    <td class="narrow">
+                        <label for="season">Default Season</label>
+                    </td>
+                    <td>
+                        <select id="season" name="season">
+                            <?php foreach ($seasons as $s) : ?>
+                                <option
+                                    <?php if ($season === $s['season']) : ?>
+                                        selected="selected"
+                                    <?php endif; ?>
+                                    value="<?php echo $s['season']; ?>"
+                                    >
+                                    <?php echo $s['text'];?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
                 <tr>
                     <td class="narrow">
                         <label for="league_game_class">Default League</label>
@@ -369,19 +478,24 @@ function swissunihockey_ch_options()
                 </tr>
                 <tr>
                     <td class="narrow">
-                        <label for="season">Default Season</label>
+                        <label for="club_team">Default Club/Teams</label>
                     </td>
                     <td>
-                        <select id="season" name="season">
-                            <?php foreach ($seasons as $s) : ?>
-                                <option
-                                    <?php if ($season === $s['season']) : ?>
-                                        selected="selected"
-                                    <?php endif; ?>
-                                    value="<?php echo $s['season']; ?>"
-                                    >
-                                    <?php echo $s['text'];?>
-                                </option>
+                        <select id="club_team" name="club_team">
+                            <option value="ALL">All Teams</option>
+                            <?php foreach ($club_teams as $club_team) : ?>
+                                <optgroup label="<?php echo $club_team['name'];?>">
+                                    <?php foreach ($club_team['teams'] as $team) :?>
+                                        <option
+                                            <?php if ($stored_team === $team['team_name']) : ?>
+                                                selected="selected"
+                                            <?php endif; ?>
+                                            value="<?php echo $team['team_name']."|".$team['id'];?>"
+                                            >
+                                                <?php echo $team['team_name']?>
+                                            </option>
+                                </optgroup>
+                                <?php endforeach; ?>
                             <?php endforeach; ?>
                         </select>
                     </td>
@@ -428,6 +542,7 @@ function swissunihockey_ch_shortcode()
             $_REQUEST['league']? $_REQUEST['league']: '',
             $_REQUEST['season']? $_REQUEST['season']: '',
             $_REQUEST['game_class']? $_REQUEST['game_class']: '',
+            $_REQUEST['club_team']? $_REQUEST['club_team']: '',
             $_REQUEST['round']? $_REQUEST['round']: ''
         );
     }
@@ -442,7 +557,7 @@ function swissunihockey_ch_shortcode()
     }
 }
 
-function swissunihockey_ch_shortcode_1($league, $season, $game_class, $round)
+function swissunihockey_ch_shortcode_1($league, $season, $game_class, $club_team, $round)
 {
     if (!$league or !$game_class) {
         $league_game_class = $_REQUEST['league_game_class']?
@@ -457,29 +572,21 @@ function swissunihockey_ch_shortcode_1($league, $season, $game_class, $round)
             get_option('swissunihockey_ch_season');
     }
 
+    if (!$club_team) {
+        $stored_team = $_REQUEST['$club_team']?
+            explode('|', $_REQUEST['club_team'])[0]:
+            get_option('swissunihockey_ch_team_name');
+        $team_id = $_REQUEST['$club_team']?
+            explode('|', $_REQUEST['club_team'])[1]:
+            get_option('swissunihockey_ch_team_id');
+    }
     $leagues = swissunihockey_ch_get_leagues();
     $seasons = swissunihockey_ch_get_seasons();
     $games = swissunihockey_ch_get_games(
-        $league, $season, $game_class, $round
+        $team_id, $season
     );
+    $club_teams = swissunihockey_ch_get_clubs_and_teams();
     ?>
-    <link
-        href="<?php echo plugins_url(
-            '/swissunihockey.ch'
-        ); ?>/vendor/font-awesome/css/font-awesome.css"
-        rel="stylesheet"
-        >
-    <link
-        href="<?php echo plugins_url(
-            '/swissunihockey.ch'
-        ); ?>/swissunihockey.ch.css"
-        rel="stylesheet"
-        >
-    <script
-        src="<?php echo plugins_url(
-            '/swissunihockey.ch'
-        ); ?>/swissunihockey.ch.js"
-        ></script>
     <div class="swissunihockey-ch">
         <form
             action="<?php echo swissunihockey_ch_get_url(
@@ -530,6 +637,30 @@ function swissunihockey_ch_shortcode_1($league, $season, $game_class, $round)
                                     >
                                     <?php echo $s['text'];?>
                                 </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="season">Club/Team</label>
+                    </td>
+                    <td>
+                        <select id="club_team" name="club_team">
+                            <option value="ALL">All Teams</option>
+                            <?php foreach ($club_teams as $club_team) : ?>
+                                <optgroup label="<?php echo $club_team['name'];?>">
+                                    <?php foreach ($club_team['teams'] as $team) :?>
+                                        <option
+                                            <?php if ($stored_team === $team['team_name']) : ?>
+                                                selected="selected"
+                                            <?php endif; ?>
+                                            value="<?php echo $team['team_name']."|".$club_team['name'];?>"
+                                            >
+                                                <?php echo $team['team_name']?>
+                                            </option>
+                                </optgroup>
+                                <?php endforeach; ?>
                             <?php endforeach; ?>
                         </select>
                     </td>
