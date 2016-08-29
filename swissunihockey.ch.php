@@ -45,18 +45,16 @@ function swissunihockey_ch_get_leagues()
         $item->expiresAfter(86400);
         $GLOBALS['swissunihockey.ch']['pool']->save($item);
     }
-
     return $leagues;
 }
 
 function swissunihockey_ch_get_teams($club)
 {
     $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
-        sprintf('team_options/%s/', $club)
+        sprintf('teams/%s/%s/%s/%s', $league, $season, $game_class, $round)
     );
-    $teams = $item->get();
+    $teams_id = $item->get();
     if ($item->isMiss()) {
-        $teams = array();
         $response = wp_remote_get(
             sprintf(
                 'https://api-v2.swissunihockey.ch/api/clubs/%s/statistics',
@@ -65,17 +63,13 @@ function swissunihockey_ch_get_teams($club)
         );
         $body = json_decode($response['body'], true);
         foreach ($body['data']['regions'][0]['rows'] as $entry) {
-            $_ = array(
-                'id' => $entry['team_id'],
-                'team_name' => $entry['cells'][0]['text'][0]
-            );
-            $teams[] = $_;
+            $_[] = $entry['team_id'];
         }
-        $item->set($teams);
+        $item->set($teams_id);
         $item->expiresAfter(86400);
         $GLOBALS['swissunihockey.ch']['pool']->save($item);
     }
-    return $teams;
+    return $_;
 }
 
 function swissunihockey_ch_get_clubs()
@@ -101,27 +95,34 @@ function swissunihockey_ch_get_clubs()
     return $clubs;
 }
 
-function swissunihockey_ch_get_clubs_and_teams(){
-    $item = $GLOBALS['swissunihockey.ch']['pool']->getItem('clubs_and_teams');
-    $clubs = $item->get();
+function swissunihockey_ch_get_clubs_and_teams($league)
+{
+    $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
+        sprintf('clubs_and_teams/%s/%s/%s/%s', $league, $season, $game_class, $round)
+    );
+    $teams_name = $item->get();
     if ($item->isMiss()) {
-        $clubs = swissunihockey_ch_get_clubs();
-    }
-    foreach ($clubs as $club)
-    {
-        $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
-            sprintf('team_options/%s/', $club['club_id'])
+        $teams_name = array();
+        $response = wp_remote_get(
+            sprintf(
+                'https://api-v2.swissunihockey.ch/api/teams?league=%s&game_class=%s',
+                $league['league'],
+                $league['game_class']
+            )
         );
-        $teams = $item->get();
-        if ($item->isMiss()) {
-            $teams = swissunihockey_ch_get_teams($club['club_id']);
+        $body = json_decode($response['body'], true);
+        foreach ($body['data']['regions'][0]['rows'] as $row) {
+            $_ = array(
+                'id' => $row['id'],
+                'name' => $row['cells'][0]['text'][0]
+            );
+            $teams_name = $_;
         }
-        $club_teams[] = array(
-            'name' => $club['club_name'],
-            'teams' => $teams,
-        );
+        $item->set($teams_name);
+        $item->expiresAfter(86400);
+        $GLOBALS['swissunihockey.ch']['pool']->save($item);
     }
-    return $club_teams;
+    return $teams_name;
 }
 
 function swissunihockey_ch_get_seasons()
@@ -413,7 +414,6 @@ function swissunihockey_ch_options()
 
     $leagues = swissunihockey_ch_get_leagues();
     $seasons = swissunihockey_ch_get_seasons();
-    $club_teams = swissunihockey_ch_get_clubs_and_teams();
 
     ?>
     <div class="swissunihockey-ch">
@@ -574,8 +574,17 @@ function swissunihockey_ch_shortcode_1($league, $season, $game_class, $round)
     }
     $leagues = swissunihockey_ch_get_leagues();
     $seasons = swissunihockey_ch_get_seasons();
-    $games = swissunihockey_ch_get_games($league, $season, $game_class, $round);
-    $club_teams = swissunihockey_ch_get_clubs_and_teams();
+    $clubs = swissunihockey_ch_get_clubs();
+    $clubs_team = array();
+    foreach ($leagues as $league) {
+        $clubs_team[] = swissunihockey_ch_get_clubs_and_teams($league);
+    }
+
+    $club_ids = array();
+    foreach ($clubs as $club) {
+        $team_ids[$club['club_id']] = swissunihockey_ch_get_teams($club['club_id']);
+    }
+
     ?>
     <div class="swissunihockey-ch">
         <form
