@@ -51,7 +51,7 @@ function swissunihockey_ch_get_leagues()
 function swissunihockey_ch_get_teams($club)
 {
     $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
-        sprintf('teams/%s/%s/%s/%s', $league, $season, $game_class, $round)
+        sprintf('teams_id/%s', $club)
     );
     $teams_id = $item->get();
     if ($item->isMiss()) {
@@ -63,13 +63,13 @@ function swissunihockey_ch_get_teams($club)
         );
         $body = json_decode($response['body'], true);
         foreach ($body['data']['regions'][0]['rows'] as $entry) {
-            $_[] = $entry['team_id'];
+            $teams_id[] = $entry['team_id'];
         }
         $item->set($teams_id);
         $item->expiresAfter(86400);
         $GLOBALS['swissunihockey.ch']['pool']->save($item);
     }
-    return $_;
+    return $teams_id;
 }
 
 function swissunihockey_ch_get_clubs()
@@ -98,11 +98,11 @@ function swissunihockey_ch_get_clubs()
 function swissunihockey_ch_get_clubs_and_teams($league)
 {
     $item = $GLOBALS['swissunihockey.ch']['pool']->getItem(
-        sprintf('clubs_and_teams/%s/%s/%s/%s', $league, $season, $game_class, $round)
+        sprintf('teams/%s', $league)
     );
-    $teams_name = $item->get();
+    $teams = $item->get();
     if ($item->isMiss()) {
-        $teams_name = array();
+        $teams = array();
         $response = wp_remote_get(
             sprintf(
                 'https://api-v2.swissunihockey.ch/api/teams?league=%s&game_class=%s',
@@ -116,13 +116,13 @@ function swissunihockey_ch_get_clubs_and_teams($league)
                 'id' => $row['id'],
                 'name' => $row['cells'][0]['text'][0]
             );
-            $teams_name = $_;
+            $teams = $_;
         }
-        $item->set($teams_name);
+        $item->set($teams);
         $item->expiresAfter(86400);
         $GLOBALS['swissunihockey.ch']['pool']->save($item);
     }
-    return $teams_name;
+    return $teams;
 }
 
 function swissunihockey_ch_get_seasons()
@@ -586,6 +586,23 @@ function swissunihockey_ch_shortcode_1($league, $season, $game_class, $round)
     }
 
     ?>
+    <link
+        href="<?php echo plugins_url(
+            '/swissunihockey.ch'
+        ); ?>/vendor/font-awesome/css/font-awesome.css"
+        rel="stylesheet"
+        >
+    <link
+        href="<?php echo plugins_url(
+            '/swissunihockey.ch'
+        ); ?>/swissunihockey.ch.css"
+        rel="stylesheet"
+        >
+    <script
+        src="<?php echo plugins_url(
+            '/swissunihockey.ch'
+        ); ?>/swissunihockey.ch.js"
+        ></script>
     <div class="swissunihockey-ch">
         <form
             action="<?php echo swissunihockey_ch_get_url(
